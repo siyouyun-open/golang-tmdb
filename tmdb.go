@@ -5,9 +5,9 @@ package tmdb
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"fmt"
+	"github.com/go-resty/resty/v2"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -53,8 +53,8 @@ type Client struct {
 	// Auto retry flag to indicates if the client
 	// should retry the previous operation.
 	autoRetry bool
-	// http.Client for custom configuration.
-	http http.Client
+	// resty.Client for custom configuration.
+	http *resty.Client
 }
 
 // Response type is a struct for http responses.
@@ -63,12 +63,27 @@ type Response struct {
 	StatusMessage string `json:"status_message"`
 }
 
-// Init setups the Client with an apiKey.
-func Init(apiKey string) (*Client, error) {
+// Init setups the resty Client with an apiKey.
+func Init(apiKey string, client *resty.Client) (*Client, error) {
 	if apiKey == "" {
 		return nil, errors.New("api key is empty")
 	}
-	return &Client{apiKey: apiKey}, nil
+	if client == nil {
+		client = resty.New()
+	}
+	return &Client{apiKey: apiKey, http: client}, nil
+}
+
+// InitWithRawClient setups the http Client with an apiKey
+func InitWithRawClient(apiKey string, hc *http.Client) (*Client, error) {
+	if apiKey == "" {
+		return nil, errors.New("api key is empty")
+	}
+	var client *resty.Client
+	if client == nil {
+		client = resty.NewWithClient(hc)
+	}
+	return &Client{apiKey: apiKey, http: client}, nil
 }
 
 // SetSessionID will set the session id.
@@ -80,14 +95,14 @@ func (c *Client) SetSessionID(sid string) error {
 	return nil
 }
 
-// SetClientConfig sets a custom configuration for the http.Client.
-func (c *Client) SetClientConfig(httpClient http.Client) {
-	c.http = httpClient
-}
-
 // SetClientAutoRetry sets autoRetry flag to true.
 func (c *Client) SetClientAutoRetry() {
 	c.autoRetry = true
+}
+
+// GetHttpClient get resty client
+func (c *Client) GetHttpClient() *resty.Client {
+	return c.http
 }
 
 // Auto retry default duration.
@@ -116,35 +131,27 @@ func (c *Client) get(url string, data interface{}) error {
 	if url == "" {
 		return errors.New("url field is empty")
 	}
-	if c.http.Timeout == 0 {
-		c.http.Timeout = time.Second * 10
+
+	if c.http.GetClient().Timeout == 0 {
+		c.http.SetTimeout(time.Second * 10)
 	}
-	req, err := http.NewRequest(http.MethodGet, url, nil)
-	if err != nil {
-		return fmt.Errorf("could not fetch the url: %s", err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	req = req.WithContext(ctx)
-	req.Header.Add("content-type", "application/json;charset=utf-8")
+
 	for {
-		res, err := c.http.Do(req)
+		resp, err := c.http.R().SetHeaders(map[string]string{
+			"content-type": "application/json;charset=utf-8",
+		}).SetResult(data).Get(url)
 		if err != nil {
 			return err
 		}
-		defer res.Body.Close()
-		if res.StatusCode == http.StatusTooManyRequests && c.autoRetry {
-			time.Sleep(retryDuration(res))
+		if resp.StatusCode() == http.StatusTooManyRequests && c.autoRetry {
+			time.Sleep(retryDuration(resp.RawResponse))
 			continue
 		}
-		if res.StatusCode == http.StatusNoContent {
+		if resp.StatusCode() == http.StatusNoContent {
 			return nil
 		}
-		if res.StatusCode != http.StatusOK {
-			return c.decodeError(res)
-		}
-		if err = json.NewDecoder(res.Body).Decode(data); err != nil {
-			return fmt.Errorf("could not decode the data: %s", err)
+		if resp.StatusCode() != http.StatusOK {
+			return c.decodeError(resp.RawResponse)
 		}
 		break
 	}
@@ -160,42 +167,27 @@ func (c *Client) request(
 	if url == "" {
 		return errors.New("url field is empty")
 	}
-	if c.http.Timeout == 0 {
-		c.http.Timeout = time.Second * 10
+	if c.http.GetClient().Timeout == 0 {
+		c.http.SetTimeout(time.Second * 10)
 	}
-	bodyBytes := new(bytes.Buffer)
-	json.NewEncoder(bodyBytes).Encode(body)
-	req, err := http.NewRequest(
-		method,
-		url,
-		bytes.NewBuffer(bodyBytes.Bytes()),
-	)
-	if err != nil {
-		return fmt.Errorf("could not fetch the url: %s", err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	req = req.WithContext(ctx)
-	req.Header.Add("content-type", "application/json;charset=utf-8")
 	for {
-		res, err := c.http.Do(req)
+		request := c.http.R().SetHeaders(map[string]string{
+			"content-type": "application/json;charset=utf-8",
+		}).SetBody(body).SetResult(data)
+		resp, err := request.Execute(method, url)
 		if err != nil {
 			return errors.New(err.Error())
 		}
-		defer res.Body.Close()
-		if c.autoRetry && shouldRetry(res.StatusCode) {
-			time.Sleep(retryDuration(res))
+		if c.autoRetry && shouldRetry(resp.StatusCode()) {
+			time.Sleep(retryDuration(resp.RawResponse))
 			continue
 		}
 		// Checking if the response is greater or equal
 		// to 300 or less than 200.
-		if res.StatusCode >= http.StatusMultipleChoices ||
-			res.StatusCode < http.StatusOK ||
-			res.StatusCode == http.StatusNoContent {
-			return c.decodeError(res)
-		}
-		if err = json.NewDecoder(res.Body).Decode(data); err != nil {
-			return fmt.Errorf("could not decode the data: %s", err)
+		if resp.StatusCode() >= http.StatusMultipleChoices ||
+			resp.StatusCode() < http.StatusOK ||
+			resp.StatusCode() == http.StatusNoContent {
+			return c.decodeError(resp.RawResponse)
 		}
 		break
 	}

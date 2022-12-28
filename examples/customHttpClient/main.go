@@ -2,19 +2,14 @@ package main
 
 import (
 	"fmt"
-	"net/http"
+	"github.com/go-resty/resty/v2"
+	tmdb "github.com/siyouyun-open/golang-tmdb"
 	"os"
-	"time"
-
-	tmdb "github.com/cyruzin/golang-tmdb"
 )
 
 func main() {
 
-	tmdbClient, err := tmdb.Init(os.Getenv("APIKey"))
-
-	// Setting a custom config for http.Client.
-	tmdbClient.SetClientConfig(http.Client{Timeout: time.Second * 5})
+	tmdbClient, err := tmdb.Init(os.Getenv("APIKey"), resty.New())
 
 	if err != nil {
 		fmt.Println(err)

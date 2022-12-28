@@ -97,23 +97,13 @@ func (suite *TMBDTestSuite) TestDecodeErrorReadBodyFail() {
 }
 
 func (suite *TMBDTestSuite) TestInit() {
-	_, err := Init(apiKey)
+	_, err := Init(apiKey, nil)
 	suite.Nil(err)
 }
 
 func (suite *TMBDTestSuite) TestInitFail() {
-	_, err := Init("")
+	_, err := Init("", nil)
 	suite.NotNil(err)
-}
-
-func (suite *TMBDTestSuite) TestSetClientConfig() {
-	suite.client.SetClientConfig(http.Client{Timeout: time.Second * 10})
-	suite.Equal(time.Second*10, suite.client.http.Timeout)
-}
-
-func (suite *TMBDTestSuite) TestSetClientConfigNoTimeout() {
-	suite.client.SetClientConfig(http.Client{Timeout: 0})
-	suite.Equal(time.Second*0, suite.client.http.Timeout)
 }
 
 func (suite *TMBDTestSuite) TestSetAutoRetry() {
