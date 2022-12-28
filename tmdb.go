@@ -100,8 +100,8 @@ func (c *Client) SetClientAutoRetry() {
 	c.autoRetry = true
 }
 
-// GetHttpClient get resty client
-func (c *Client) GetHttpClient() *resty.Client {
+// GetRestyClient get resty client
+func (c *Client) GetRestyClient() *resty.Client {
 	return c.http
 }
 
